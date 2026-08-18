@@ -1,0 +1,238 @@
+═══════════════════════════════════════════════════════════════════════════════
+  MR NUTZ SNES RECOMPILATION PROJECT — DETAILED STATUS REPORT
+  For project handoff to another LLM or developer
+═══════════════════════════════════════════════════════════════════════════════
+
+────────────────────────────────────────────────────────────────────────────────
+1. PROJECT OVERVIEW
+────────────────────────────────────────────────────────────────────────────────
+
+Goal: Create a native recompilation of the SNES game "Mr. Nutz (USA) (En,Fr)"
+using the snesrecomp framework (https://github.com/mstan/snesrecomp), modeled
+on the MegamanXSNESRecomp project structure.
+
+ROM: Mr. Nutz (USA) (En,Fr).sfc
+  - Size: 1,048,576 bytes (1 MB), LoROM mapping
+  - SHA256: 3472dd574b50aed2fa998f464398db4fbb00f5a300a672c3737ee9336a008a16
+  - Reset: $00:80B5, NMI: $00:8349, IRQ: $00:83B3
+
+Project root: /var/home/steph/Dev/MrNoisette/Output/
+ROM location: /var/home/steph/Dev/MrNoisette/ROM/
+
+────────────────────────────────────────────────────────────────────────────────
+2. ARCHITECTURE (refactored)
+────────────────────────────────────────────────────────────────────────────────
+
+The codebase is organized into modules by role, not by framework convention:
+
+  src/
+    app/          — Entry point and main loop orchestration
+      main.c       Entry point: SDL init, game registration, main loop
+      main.h       Aggregated includes for the application
+
+    platform/     — Platform abstraction (SDL)
+      window.c/h   SDL window, renderer, texture (XRGB8888, vsync off)
+      audio_out.c/h SDL audio device, SPC ring buffer, audio callbacks
+      input.c/h    Keyboard + gamepad polling, SwapInputBits workaround,
+                  config.ini [Keyboard]/[Gamepad] parsing
+      config.c/h   config.ini parser ([General], [Graphics], [Sound], [Music])
+
+    mrnutz/       — Mr Nutz game-specific logic
+      game.c/h     RtlGameInfo registration + game state machine
+                  (BOOT/TITLE/DEMO/PLAYING/PAUSED/LEVEL_LOAD)
+      frame.c/h    RunOneFrameOfGame: reset handler, per-frame NMI + main loop
+      ppu_render.c/h PPU rendering with per-scanline HDMA (channels 5-7)
+      mrnutz_spc_player.c/h SPC player (64KB RAM, DSP init, SPC upload)
+      wram.h       Named WRAM aliases (blink_timer, game_mode_ptr, etc.)
+      controls.h   Mr Nutz control constants (B=right, Y=left, A=jump, etc.)
+      recomp_decls.h I_RESET/I_NMI/I_IRQ/WatchdogCheck declarations
+      rom_offsets.h ROM constants (vectors, game mode addresses)
+
+    audio/        — MP3 music replacement (stubs, to be implemented)
+      mp3_decoder.c/h  Lightweight MP3 decoder (minimp3, stub)
+      mp3_player.c/h   MP3 playback engine (play/stop/loop/volume, stub)
+      music_manager.c/h Track detection via SPC ports, MP3 mapping (stub)
+      audio_mixer.c/h   SPC (SFX) + MP3 (music) mixer
+
+    levels/       — Custom levels (stubs, to be implemented)
+      level_format.h   .mrlvl data structures (tiles, objects, palette)
+      level_reader.c/h .mrlvl JSON parser (stub, needs cJSON)
+      level_injector.c/h DMA/VRAM level data substitution (stub)
+      level_browser.c/h In-game level selection overlay (stub)
+
+    overlay/      — Debug overlays
+      fps.c/h      5x7 pixel font FPS counter (toggle with F)
+      frame_dump.c/h BMP screenshot capture (--framedump)
+
+  recomp/        — Recompiler configuration
+    bank00.cfg     Bank $00 config (vectors, tier_down_stubs)
+    funcs.h        Generated code function declarations
+
+  generated/     — Auto-generated recompiled C (gitignored)
+  snesrecomp/    — Framework submodule
+
+────────────────────────────────────────────────────────────────────────────────
+3. WHAT HAS BEEN ACCOMPLISHED
+────────────────────────────────────────────────────────────────────────────────
+
+3.1 Core game execution
+  - Reset handler runs via interp_bridge_run_until_quiescent from $00:80B5
+  - Per-frame: PPU beam advanced to vblank (scanline 225), NMI handler run
+    via interp_bridge_run_interrupt, main loop resumed via
+    interp_bridge_run_until_quiescent until WAI
+  - HDMA processing added to PPU rendering (channels 5-7, per-scanline)
+  - Game reaches title screen, starts game, enters first level, player moves
+
+3.2 Display
+  - SDL_PIXELFORMAT_XRGB8888 fixes alpha=0 black screen
+  - Vsync off + manual 60fps frame pacer (was 30fps with vsync)
+  - FPS counter overlay (5x7 font, F key toggle, window title)
+
+3.3 Input
+  - config.ini [Keyboard] + [Gamepad] sections, both active in parallel
+  - SwapInputBits workaround: each SNES button maps to a unique bit
+  - Start workaround: bit 0x800 set alongside SN_START for BIT #$0010 detection
+  - SDL3 gamepad auto-opened on startup
+  - Keyboard uses SDL_GetKeyboardState polling (avoids missed presses)
+
+3.4 Audio
+  - SPC player with 64KB RAM, DSP init, length-prefixed SPC upload
+  - SDL3 audio stream at 44100 Hz, 2 channels
+
+3.5 Architecture
+  - Refactored from monolithic main.c (609 lines) to modular structure
+  - 7 modules: app, platform, mrnutz, audio, levels, overlay, recomp
+  - Audio/ and levels/ modules have stub implementations ready for MP3 and
+    custom level features
+
+────────────────────────────────────────────────────────────────────────────────
+4. KNOWN ISSUES
+────────────────────────────────────────────────────────────────────────────────
+
+4.1 Gamepad mapping (Medium)
+  Default gamepad buttons in config.ini don't match Mr Nutz's reversed
+  controller format. Needs testing with a real gamepad.
+
+4.2 Title screen cursor blink (Low, rolled back)
+  The game's $D1D7 blink handler is gated behind a 240-frame timer and
+  relies on WRAM code at $10C2 that was not loaded (all zeros). Manual
+  pixel-clearing attempts caused full-screen flicker. Needs targeted
+  approach (only clear selected menu item pixels) or WRAM code fix.
+
+4.3 Framerate stutter (Low)
+  Occasional stutter despite 60fps counter. Likely interpreter step cap
+  resets on memory writes in tight loops.
+
+4.4 WRAM code not loaded
+  Game copies code to WRAM $10C2 during init, but interpreter step cap
+  cuts off initialization before copy completes. Affects blink and
+  possibly other WRAM-resident game features.
+
+4.5 Performance
+  Only interrupt vectors are statically recompiled. 219 dispatch miss
+  sites in tier2 logs. Enriching bank configs would promote hot functions
+  to native C.
+
+────────────────────────────────────────────────────────────────────────────────
+5. STUB MODULES (to be implemented)
+────────────────────────────────────────────────────────────────────────────────
+
+5.1 MP3 Music Replacement (src/audio/)
+  - mp3_decoder.c: stub, needs minimp3 (single-header, public domain)
+  - mp3_player.c: stub, has play/stop/loop/volume API, needs buffer management
+  - music_manager.c: stub, needs SPC port monitoring for track detection
+  - audio_mixer.c: implemented, mixes SPC + MP3 with configurable volumes
+  - config.ini [Music] section: MusicMode (SPC-only/MP3-only/Mixed),
+    MusicVolume, SfxVolume
+
+  Implementation plan:
+  1. Add minimp3.h to third_party/
+  2. Implement mp3_decoder.c (open file, decode chunks to PCM)
+  3. Implement mp3_player.c (ring buffer, looping, volume scaling)
+  4. Implement music_manager.c: monitor $2140-$2143 for SPC track commands,
+     map track IDs to MP3 files via music_map.ini
+  5. Integrate mixer into audio_out.c callback
+
+5.2 Custom Levels (src/levels/)
+  - level_format.h: defined (tiles, objects, palette, scroll, music ID)
+  - level_reader.c: stub, needs cJSON for .mrlvl JSON parsing
+  - level_injector.c: stub, needs DMA/VRAM write interception
+  - level_browser.c: stub, needs 5x7 font rendering for level list
+
+  Implementation plan:
+  1. Add cJSON to third_party/
+  2. Implement level_reader.c (parse .mrlvl JSON into LevelData struct)
+  3. Study game's level load sequence (DMA to VRAM, CGRAM writes)
+  4. Implement level_injector.c (intercept DMA, substitute custom data)
+  5. Implement level_browser.c (overlay menu, file listing, selection)
+  6. Add assets/levels/ directory for .mrlvl files
+
+────────────────────────────────────────────────────────────────────────────────
+6. KEY TECHNICAL DETAILS
+────────────────────────────────────────────────────────────────────────────────
+
+6.1 SwapInputBits
+  Framework reverses all 16 bits of controller value before $4218/$4219.
+  Each SNES button has a unique bit in the 12-bit input word (see controls.h).
+  Start needs additional bit 0x800 for the game's BIT #$0010 test.
+
+6.2 NMI Handler Structure
+  $00:8349 → JML $80:834D → PHA/PHX/PHY/PHD/PHB → JMP ($01DC)
+  $01DC = $8357 → JML $9DB413
+  $9DB413 reads V counter, subtracts $E0:
+    V=$E0/$E1/$E2 → JMP ($01DE) = frame processing at $9D:E1B6
+    Otherwise → enable NMI, RTI (no frame processing)
+
+6.3 PPU Beam Advance
+  Before each NMI: snes_advance_master_cycles(1364 * 225 - hPos)
+  Sets vPos=225 so V counter reads 225, 225-$E0=1, takes frame processing path.
+
+6.4 Game State Detection (game.c)
+  MrNutz_GetGameState() reads game_mode_ptr ($057E) and nmi_vector ($01DC):
+    $D0E8 → BOOT (fade-in)
+    $CC08 + $8357 → TITLE (static)
+    $D1D7 → TITLE (blink mode)
+    $835B → PLAYING
+    INIDISP & 0x80 → LEVEL_LOAD
+
+────────────────────────────────────────────────────────────────────────────────
+7. BUILD & RUN
+────────────────────────────────────────────────────────────────────────────────
+
+  Build:
+    export SDL3_DIR=$HOME/.local/sdl3-prefix/lib/cmake/SDL3
+    cd /var/home/steph/Dev/MrNoisette/Output
+    sh build.sh
+
+  Run:
+    export LD_LIBRARY_PATH=$HOME/.local/sdl3-prefix/lib64:$LD_LIBRARY_PATH
+    ./build/MrNutzRecomp "ROM/Mr. Nutz (USA) (En,Fr).sfc"
+
+  Frame dump:
+    ./build/MrNutzRecomp --framedump demo --framedump-skip 100 \
+      --framedump-max 600 "ROM/Mr. Nutz (USA) (En,Fr).sfc"
+
+────────────────────────────────────────────────────────────────────────────────
+8. SUGGESTED NEXT STEPS
+────────────────────────────────────────────────────────────────────────────────
+
+  1. Fix gamepad mapping (test with real gamepad, adjust config.ini)
+  2. Implement MP3 music (add minimp3, implement decoder/player/manager)
+  3. Fix WRAM code loading (investigate step cap during init)
+  4. Implement custom levels (add cJSON, implement reader/injector/browser)
+  5. Enrich bank configs (use tier2 logs to promote hot functions to AOT)
+  6. Title screen blink (targeted pixel approach or WRAM code fix)
+
+────────────────────────────────────────────────────────────────────────────────
+9. ENVIRONMENT
+────────────────────────────────────────────────────────────────────────────────
+
+  - Host: Fedora Atomic (Bazzite) x86_64
+  - SDL3: extracted from SDL3-devel RPM to ~/.local/sdl3-prefix/
+  - SDL3 CMake: SDL3_DIR=$HOME/.local/sdl3-prefix/lib/cmake/SDL3
+  - Rust: via rustup, cargo builds the native analyzer
+  - Python 3.14: for snesrecomp_cli.py
+
+═══════════════════════════════════════════════════════════════════════════════
+  END OF REPORT
+═══════════════════════════════════════════════════════════════════════════════

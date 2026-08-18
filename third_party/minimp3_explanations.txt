@@ -1,0 +1,7 @@
+minimp3.h needs to be downloaded manually from:
+https://github.com/lieff/minimp3/raw/master/minimp3.h
+
+Place it at: third_party/minimp3.h
+
+It's a single-header library (public domain) that provides
+MP3 decoding with no external dependencies.
