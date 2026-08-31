@@ -1,7 +1,23 @@
-# Mr. Nutz (USA) (En,Fr) — Recompilation Project
+# Mr. Nutz (SNES) Recompilation Project (WIP)
 
-A native recompilation of the SNES game *Mr. Nutz* using the
-[snesrecomp](https://github.com/mstan/snesrecomp) framework.
+A native recompilation of the SNES game *Mr. Nutz* using the [snesrecomp](https://github.com/mstan/snesrecomp) framework.
+
+---
+
+## Global Status
+The game launches and is playable! (with some occasional slowdowns). A lot of work is still necessary to fix the various bugs and slowdowns (see below)
+
+--
+
+## What Remains To Do
+
+| Item | Status | Priority |
+|------|--------|----------|
+| Gamepad mapping correction | Pending — current defaults don't match Mr Nutz controls | Medium |
+| Title screen cursor blink | Rolled back — manual pixel clearing caused full-screen flicker. Needs a targeted approach (only clear the selected menu item's text, not entire rows) | Low |
+| Framerate stutter investigation | Occasional stutter despite stable FPS counter. Likely interpreter tier stepping cap resets on memory writes | Low |
+| Enrich bank configs | 219 dispatch miss sites in the tier2 log. Promoting hot functions to AOT would improve performance | Future |
+| Co-simulation | Enable SNES_COSIM to validate against snes9x | Future |
 
 ---
 
@@ -46,52 +62,26 @@ MrNoisette/
 - Created project structure modeled on MegamanXSNESRecomp
 
 ### 2. Game Execution
-- **Reset handler**: Runs from SNES reset vector ($00:80B5) via
-  `interp_bridge_run_until_quiescent` until the main loop's WAI yields
-- **Per-frame NMI**: Advances PPU beam to vblank (scanline 225), pushes
-  interrupt frame, runs NMI handler ($00:8349) via
-  `interp_bridge_run_interrupt`, then resumes main loop via
-  `interp_bridge_run_until_quiescent` until next WAI
-- **PPU beam fix**: The NMI handler reads H/V counters ($2137/$213D) to
-  determine its code path. Without advancing the beam to vblank, the
-  counters return 0, causing a ~240x slowdown in the fade-in
-- **HDMA processing**: Added per-scanline HDMA in `MrNutzDrawPpuFrame`
-  (channels 5–7) for per-line effects
+- **Reset handler**: Runs from SNES reset vector ($00:80B5) via `interp_bridge_run_until_quiescent` until the main loop's WAI yields
+- **Per-frame NMI**: Advances PPU beam to vblank (scanline 225), pushes interrupt frame, runs NMI handler ($00:8349) via `interp_bridge_run_interrupt`, then resumes main loop via `interp_bridge_run_until_quiescent` until next WAI
+- **PPU beam fix**: The NMI handler reads H/V counters ($2137/$213D) to determine its code path. Without advancing the beam to vblank, the counters return 0, causing a ~240x slowdown in the fade-in
+- **HDMA processing**: Added per-scanline HDMA in `MrNutzDrawPpuFrame` (channels 5–7) for per-line effects
 
 ### 3. Display
-- **SDL_PIXELFORMAT_XRGB8888**: The PPU writes BGRA pixels with alpha=0.
-  Using XRGB8888 + SDL_BLENDMODE_NONE makes SDL ignore alpha, fixing the
-  black screen issue
-- **Vsync off + manual 60fps pacer**: Vsync was rounding frame time to
-  multiples of 16.67ms, causing 30fps. Disabling vsync and manually pacing
-  to 16ms achieves 60fps
+- **SDL_PIXELFORMAT_XRGB8888**: The PPU writes BGRA pixels with alpha=0. Using XRGB8888 + SDL_BLENDMODE_NONE makes SDL ignore alpha, fixing the black screen issue
+- **Vsync off + manual 60fps pacer**: Vsync was rounding frame time to multiples of 16.67ms, causing 30fps. Disabling vsync and manually pacing to 16ms achieves 60fps
 - **FPS counter**: Toggle with F key or via window title
 
 ### 4. Input System
-- **config.ini sections `[Keyboard]` and `[Gamepad]`**: Both active
-  simultaneously (OR-ed). One line per SNES button, editable via INI
-- **SwapInputBits workaround**: The framework's `SwapInputBits()` reverses
-  all 16 bits of the controller value. Each SNES button maps to a unique
-  bit in the 12-bit input word. Start needs an extra bit (0x800) because
-  the game's `BIT #$0010` test checks output bit 4 = input bit 11
+- **config.ini sections `[Keyboard]` and `[Gamepad]`**: Both active simultaneously (OR-ed). One line per SNES button, editable via INI
+- **SwapInputBits workaround**: The framework's `SwapInputBits()` reverses all 16 bits of the controller value. Each SNES button maps to a unique
+  bit in the 12-bit input word. Start needs an extra bit (0x800) because the game's `BIT #$0010` test checks output bit 4 = input bit 11
 - **Gamepad support**: SDL3 gamepad API, auto-opened on startup
-
+  
 ### 5. Audio
 - SPC player with 64KB RAM, DSP init, and length-prefixed SPC upload
 - SDL3 audio stream at 44100 Hz, 2 channels
 - Audio thread runs independently via SDL callback
-
----
-
-## What Remains To Do
-
-| Item | Status | Priority |
-|------|--------|----------|
-| Gamepad mapping correction | Pending — current defaults don't match Mr Nutz controls | Medium |
-| Title screen cursor blink | Rolled back — manual pixel clearing caused full-screen flicker. Needs a targeted approach (only clear the selected menu item's text, not entire rows) | Low |
-| Framerate stutter investigation | Occasional stutter despite stable FPS counter. Likely interpreter tier stepping cap resets on memory writes | Low |
-| Enrich bank configs | 219 dispatch miss sites in the tier2 log. Promoting hot functions to AOT would improve performance | Future |
-| Co-simulation | Enable SNES_COSIM to validate against snes9x | Future |
 
 ---
 
